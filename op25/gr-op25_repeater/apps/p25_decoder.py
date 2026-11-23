@@ -90,7 +90,7 @@ class p25_decoder_sink_b(gr.hier_block2):
             do_phase2_tdma = True
 
         if msgq is None:
-            msgq = gr.msg_queue(1)
+            msgq = op25.msg_queue(1)
 
         self.p25_decoders = []
         self.audio_s2f = []

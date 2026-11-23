@@ -41,7 +41,8 @@ def create_image(textlist=["Blank"], imgfile="test.png", bgcolor='red', fgcolor=
     draw        = ImageDraw.Draw(img)
     cursor = 0
     for line in textlist:
-        w,h         = draw.textsize(line, font)
+        _b = draw.textbbox((0, 0), line, font=font)   # PIL>=10: textsize removed
+        w, h = _b[2] - _b[0], _b[3] - _b[1] + 2
         # TODO: overwidth check needed?
         if cursor+h >= height:
             break

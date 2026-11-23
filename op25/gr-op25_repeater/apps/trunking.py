@@ -408,6 +408,14 @@ class trunked_system (object):
             self.voice_frequencies[frequency]['srcaddr'][tdma_slot] = srcaddr
             self.voice_frequencies[frequency]['srcaddr_tag'][tdma_slot] = self.get_unit_id_tag(srcaddr)
             self.voice_frequencies[frequency]['srcaddr_color'][tdma_slot] = self.get_unit_id_color(srcaddr)
+        # p25app: per-grant hook so the application can follow several calls in parallel
+        hook = getattr(self, 'grant_hook', None)
+        if hook is not None and tgid:    # (uplink is the paired uplink frequency, not a flag)
+            try:
+                hook(frequency, tgid, tdma_slot, srcaddr, protected)
+            except Exception:
+                import traceback
+                sys.stderr.write('grant_hook error: %s\n' % traceback.format_exc())
 
     def get_updated_talkgroups(self, start_time):
         return [tgid for tgid in self.talkgroups if (
@@ -1291,6 +1299,9 @@ class rx_ctl (object):
         if nac in self.configs:
             cfg = self.configs[nac]
         self.trunked_systems[nac] = trunked_system(debug = self.debug, config=cfg, send_event=self.send_event, nac=nac)
+        _f = getattr(self, 'grant_hook_factory', None)
+        if _f is not None:
+            self.trunked_systems[nac].grant_hook = _f(nac, self.trunked_systems[nac])
 
     def build_config_tsv(self, tsv_filename):
         self.setup_config(load_tsv(tsv_filename))

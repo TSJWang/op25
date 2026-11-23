@@ -2,3 +2,9 @@
 build/
 # Ignore .pyc compiled python bytecode files
 *.pyc
+# local build tree, generated files, runtime data
+src/
+*.db
+__pycache__/
+*.pyc
+*.iq

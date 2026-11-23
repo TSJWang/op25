@@ -193,7 +193,7 @@ class tx_block(gr.top_block):
         audio_chans = [chan for chan in self.channels if chan.config['source'].startswith('audio:')]
         if len(audio_chans):
             AUDIO = audio.source(options.alsa_rate, options.audio_input)
-            lpf_taps = filter.firdes.low_pass(1.0, options.alsa_rate, 3400.0, 3400 * 0.1, filter.firdes.WIN_HANN)
+            lpf_taps = filter.firdes.low_pass(1.0, options.alsa_rate, 3400.0, 3400 * 0.1, fft.window.WIN_HANN)
             audio_rate = 8000
             AUDIO_DECIM = filter.fir_filter_fff (int(options.alsa_rate / audio_rate), lpf_taps)
             AUDIO_SCALE = blocks.multiply_const_ff(32767.0 * options.gain)

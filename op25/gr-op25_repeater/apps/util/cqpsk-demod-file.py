@@ -71,7 +71,7 @@ class my_top_block(gr.top_block):
         else:
             AMP = blocks.multiply_const_cc(options.gain)
 
-        lpf_taps = filter.firdes.low_pass(1.0, sample_rate, options.low_pass, options.low_pass * 0.1, filter.firdes.WIN_HANN)
+        lpf_taps = filter.firdes.low_pass(1.0, sample_rate, options.low_pass, options.low_pass * 0.1, fft.window.WIN_HANN)
 
         decim_amt = 1
         if options.tone_detect:
@@ -129,7 +129,7 @@ class my_top_block(gr.top_block):
                 do_imbe = True
         do_output = True # enable block's output stream
         do_msgq = False  # msgq output not yet implemented
-        msgq = gr.msg_queue(2)
+        msgq = op25.msg_queue(2)
         DECODER = op25_repeater.p25_frame_assembler(hostname, port, debug, do_imbe, do_output, do_msgq, msgq, False, False)
 
         OUT = blocks.file_sink(gr.sizeof_char, options.output_file)

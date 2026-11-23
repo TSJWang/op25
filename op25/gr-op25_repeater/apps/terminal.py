@@ -299,7 +299,7 @@ class curses_terminal(threading.Thread):
         if self.sock:
             self.sock.send(json.dumps({'command': command, 'data': data}))
         else:
-            msg = gr.message().make_from_string(command, -2, data, 0)
+            msg = op25.message().make_from_string(command, -2, data, 0)
             self.output_q.insert_tail(msg)
 
     def run(self):
@@ -357,7 +357,7 @@ class zeromq_terminal(threading.Thread):
             if not self.keep_running:
                 break
             d = json.loads(js)
-            msg = gr.message().make_from_string(str(d['command']), d['msgtype'], d['data'], 0)
+            msg = op25.message().make_from_string(str(d['command']), d['msgtype'], d['data'], 0)
             if self.output_q.full_p():
                 self.output_q.delete_head()
             if not self.output_q.full_p():
@@ -420,7 +420,7 @@ class udp_terminal(threading.Thread):
             if data['command'] == 'quit':
                 self.keepalive_until = 0
                 continue
-            msg = gr.message().make_from_string(str(data['command']), -2, data['data'], 0)
+            msg = op25.message().make_from_string(str(data['command']), -2, data['data'], 0)
             self.output_q.insert_tail(msg)
             self.remote_ip = addr[0]
             self.remote_port = addr[1]
@@ -442,7 +442,7 @@ def op25_terminal(input_q,  output_q, terminal_type):
 
 class terminal_client(object):
     def __init__(self):
-        self.input_q = gr.msg_queue(10)
+        self.input_q = op25.msg_queue(10)
         self.keep_running = True
         self.terminal = None
 
@@ -459,7 +459,7 @@ class terminal_client(object):
         while self.keep_running:
             try:
                 js, addr = self.sock.recvfrom(2048)
-                msg = gr.message().make_from_string(js, -4, 0, 0)
+                msg = op25.message().make_from_string(js, -4, 0, 0)
                 self.input_q.insert_tail(msg)
             except socket.timeout:
                 pass

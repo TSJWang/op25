@@ -242,7 +242,7 @@ class channel(object):
         if msgq is not None:
             q = msgq
         else:
-            q = gr.msg_queue(20)
+            q = op25.msg_queue(20)
         if 'decode' in config.keys() and config['decode'].startswith('p25_decoder'):
             num_ambe = 1
             (proto, wireshark_host, udp_port) = config['destination'].split(':') 
@@ -461,15 +461,27 @@ class rx_block (gr.top_block):
         self.trunk_rx = None
         self.track_errors = track_errors
         self.last_change_freq = 0
-        self.sql_db = sql_dbi()
-        self.input_q = gr.msg_queue(20)
-        self.output_q = gr.msg_queue(20)
+        self.input_q = op25.msg_queue(20)
+        self.output_q = op25.msg_queue(20)
         self.last_voice_channel_id = 0
         self.terminal = op25_terminal(self.input_q, self.output_q, terminal_type)
+        # sql_dbi thread disabled: its blocking msg_queue.delete_head() holds the GIL on py3.14/gr3.10 and stalls all threads
+        self.sql_db = type('NoSql', (), {'event': lambda s, d: None})()
+        self.app_select = set()      # tgids the user explicitly ticked: priority (settings-app-select)
+        self.app_allow = set()       # catalogued tgids whose tab has auto-play on (and not excluded/encrypted)
+        self.app_unlisted = False    # auto-play for tgids not in the catalogue (the 'Unlisted' tab)
+        self.app_catalog = set()     # all catalogued tgids
+        self.app_exclude = set()
+        self.app_assign = {}         # vc msgq_id -> {'tgid','freq','slot','last','nac'}
+        self.app_in_expire = False
         self.configure_devices(config['devices'])
         self.configure_channels(config['channels'])
         if trunk_conf_file:
             self.trunk_rx = trunking.rx_ctl(frequency_set = self.change_freq, debug = self.verbosity, conf_file = trunk_conf_file, logfile_workers=[], send_event=self.send_event)
+            # p25app: parallel voice following (see app_on_grant)
+            self.trunk_rx.grant_hook_factory = (lambda _n, _t: (lambda f, tg, sl, sa, pr: self.app_on_grant(_n, _t, f, tg, sl, sa, pr)))
+            for _nac, _tsys in self.trunk_rx.trunked_systems.items():
+                _tsys.grant_hook = self.trunk_rx.grant_hook_factory(_nac, _tsys)
         self.sinks = []
         for chan in self.channels:
             if len(chan.sinks):
@@ -540,7 +552,7 @@ class rx_block (gr.top_block):
         for chan in self.channels:
             d = chan.error_tracking(self.last_change_freq)
             if d is not None and not self.input_q.full_p():
-                msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+                msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
                 self.input_q.insert_tail(msg)
 
     def change_freq(self, params):
@@ -634,6 +646,21 @@ class rx_block (gr.top_block):
                 self.trunk_rx.process_qmsg(msg)
         elif s == 'settings-enable' and self.trunk_rx is not None:
             self.trunk_rx.enable_status(d['data'])
+        elif s == 'settings-app-select':
+            dd = d['data']
+            if isinstance(dd, dict):
+                self.app_select = set(int(x) for x in dd.get('tgids', []))
+                self.app_allow = set(int(x) for x in dd.get('allow', []))
+                self.app_unlisted = bool(dd.get('unlisted', False))
+                self.app_catalog = set(int(x) for x in dd.get('catalog', []))
+                self.app_exclude = set(int(x) for x in dd.get('exclude', []))
+            else:
+                self.app_select = set(int(x) for x in dd)
+            sys.stderr.write('app_select: %d priority tgs, %d auto-allowed, unlisted-auto=%s, %d excluded\n' % (len(self.app_select), len(self.app_allow), self.app_unlisted, len(self.app_exclude)))
+            for cid, a in list(self.app_assign.items()):   # drop channels whose tg is no longer wanted
+                if not self.app_wanted(a['tgid'], False):
+                    a['last'] = 0
+            self.app_expire()
         return False
 
     def process_ajax(self):
@@ -647,7 +674,7 @@ class rx_block (gr.top_block):
             if hasattr(chan.demod, 'get_freq_error'):
                 error.append(chan.demod.get_freq_error())
         d = {'json_type': 'rx_update', 'error': error, 'files': filenames, 'time': time.time()}
-        msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+        msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
         self.input_q.insert_tail(msg)
 
     def process_update(self):
@@ -662,17 +689,99 @@ class rx_block (gr.top_block):
         if self.trunk_rx is None:
             return ## possible race cond - just ignore
         js = self.trunk_rx.to_json()
-        msg = gr.message().make_from_string(js, -4, 0, 0)
+        msg = op25.message().make_from_string(js, -4, 0, 0)
         self.input_q.insert_tail(msg)
         self.process_ajax()
+
+    # ---- p25app additions: follow several talkgroups at once on separate voice channels ----
+    def app_vc_channels(self):
+        return [c for c in self.channels if c.role == 'vc']
+
+    def app_chan_port(self, chan):
+        dest = chan.config.get('destination', '')
+        try:
+            return int(dest.rsplit(':', 1)[1])
+        except Exception:
+            return None
+
+    def app_emit(self, d):
+        d['time'] = time.time()
+        if not self.input_q.full_p():
+            self.input_q.insert_tail(op25.message().make_from_string(json.dumps(d), -4, 0, 0))
+
+    def app_expire(self):
+        if self.app_in_expire:
+            return
+        self.app_in_expire = True
+        try:
+            now = time.time()
+            for cid, a in list(self.app_assign.items()):
+                if now - a['last'] > 3.0:
+                    del self.app_assign[cid]
+                    for c in self.app_vc_channels():
+                        if c.msgq_id == cid:
+                            c.demod.set_muted(True)
+                    self.app_emit({'json_type': 'vc_release', 'chan': cid, 'tgid': a['tgid']})
+        finally:
+            self.app_in_expire = False
+
+    def app_wanted(self, tgid, protected):
+        if tgid in self.app_select:
+            return True
+        if protected or tgid in self.app_exclude:
+            return False
+        if tgid in self.app_catalog:
+            return tgid in self.app_allow          # known talkgroup: follow if its tab has auto-play on
+        return self.app_unlisted                   # not in the catalogue: the 'Unlisted' tab decides
+
+    def app_on_grant(self, nac, tsys, frequency, tgid, tdma_slot, srcaddr, protected):
+        if not self.app_wanted(tgid, protected):
+            return
+        if self.verbosity >= 1 and not getattr(self, '_app_dbg_%d' % tgid, False):
+            setattr(self, '_app_dbg_%d' % tgid, True)
+            sys.stderr.write('app_on_grant first hit tg %d freq %s slot %s wacn %s sysid %s\n' % (tgid, frequency, tdma_slot, tsys.ns_wacn, tsys.ns_syid))
+        now = time.time()
+        self.app_expire()
+        for cid, a in self.app_assign.items():
+            if a['tgid'] == tgid and a['freq'] == frequency and a['slot'] == tdma_slot:
+                a['last'] = now
+                return
+        if tdma_slot is not None and (tsys.ns_syid < 0 or tsys.ns_wacn < 0):
+            return    # TDMA needs wacn/sysid for the scrambler: wait for the network status broadcast
+        free = None
+        for c in self.app_vc_channels():
+            if c.msgq_id not in self.app_assign:
+                free = c
+                break
+        if free is None and tgid in self.app_select:
+            # all decoders busy: a ticked talkgroup pre-empts the oldest auto-followed one
+            victims = [(a['start'], cid) for cid, a in self.app_assign.items() if a['tgid'] not in self.app_select]
+            if victims:
+                _, vcid = min(victims)
+                old = self.app_assign.pop(vcid)
+                free = [c for c in self.app_vc_channels() if c.msgq_id == vcid][0]
+                self.app_emit({'json_type': 'vc_release', 'chan': vcid, 'tgid': old['tgid']})
+        if free is None:
+            self.app_emit({'json_type': 'vc_busy', 'tgid': tgid, 'freq': frequency})
+            return
+        params = tsys.frequency_change_params(tgid, frequency, nac, tdma_slot, 'vc', now)
+        if free.set_frequency(frequency) is False:
+            self.app_emit({'json_type': 'vc_out_of_band', 'tgid': tgid, 'freq': frequency})
+            return
+        free.configure_tdma(params)
+        free.demod.set_muted(False)
+        self.app_assign[free.msgq_id] = {'tgid': tgid, 'freq': frequency, 'slot': tdma_slot, 'last': now, 'start': now, 'nac': nac}
+        self.app_emit({'json_type': 'vc_assign', 'chan': free.msgq_id, 'port': self.app_chan_port(free), 'tgid': tgid,
+                       'freq': frequency, 'slot': tdma_slot, 'srcaddr': srcaddr, 'enc': bool(protected)})
 
     def send_event(self, d):	## called from trunking module to send json msgs / updates to client
         if d is not None:
             self.sql_db.event(d)
         if d and not self.input_q.full_p():
-            msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+            msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
             self.input_q.insert_tail(msg)
         self.process_update()
+        self.app_expire()
 
     def freq_update(self):
         if self.input_q.full_p():
@@ -681,7 +790,7 @@ class rx_block (gr.top_block):
         params['json_type'] = 'change_freq'
         params['current_time'] = time.time()
         js = json.dumps(params)
-        msg = gr.message().make_from_string(js, -4, 0, 0)
+        msg = op25.message().make_from_string(js, -4, 0, 0)
         self.input_q.insert_tail(msg)
 
     def process_msg(self, msg):

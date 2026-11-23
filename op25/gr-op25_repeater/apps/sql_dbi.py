@@ -95,7 +95,7 @@ class sql_dbi:
 		self.conn = None
 		self.cursor = None
 		self.db_filename = db_filename
-		self.db_msgq = gr.msg_queue(_def_msgq_size)
+		self.db_msgq = op25.msg_queue(_def_msgq_size)
 		self.q_runner = du_queue_runner(self.db_msgq)
 		self.db_msgq_overflow = 0
 
@@ -247,7 +247,7 @@ class sql_dbi:
 		command = "INSERT INTO data_store(%s) VALUES(%s)" % (','.join(column_names), ','.join(['?'] * len(row)))
 		js = json.dumps({'command': command, 'row': row})
 		if not self.db_msgq.full_p():
-			msg = gr.message().make_from_string(js, 0, 0, 0)
+			msg = op25.message().make_from_string(js, 0, 0, 0)
 			self.db_msgq.insert_tail(msg)
 		else:
 			self.db_msgq_overflow += 1

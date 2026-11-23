@@ -20,7 +20,7 @@ class app_top_block(gr.top_block):
         IN = blocks.file_source(gr.sizeof_char, options.input_file)
 
         slotid = options.tdma_slotid
-        msgq = gr.msg_queue(2)
+        msgq = op25.msg_queue(2)
         do_msgq  = False
 
         wireshark_host = ''
@@ -29,7 +29,7 @@ class app_top_block(gr.top_block):
         do_imbe = 1
         do_output = 1
         do_msgq = 0
-        rx_q = gr.msg_queue(1)
+        rx_q = op25.msg_queue(1)
         do_audio_output = 1
         phase2_tdma = 1
         

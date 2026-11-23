@@ -133,7 +133,7 @@ class p25_demod_base(gr.hier_block2):
             self.slicer = op25_repeater.fsk4_slicer_fb(levels)
         else:
             self.symbol_filter = filter.fir_filter_fff(1, coeffs)
-            autotuneq = gr.msg_queue(2)
+            autotuneq = op25.msg_queue(2)
             self.fsk4_demod = op25.fsk4_demod_ff(autotuneq, self.if_rate, self.symbol_rate)
             levels = [ -2.0, 0.0, 2.0, 4.0 ]
             self.slicer = op25_repeater.fsk4_slicer_fb(levels)
@@ -191,7 +191,7 @@ class p25_demod_fb(p25_demod_base):
             assert input_rate % if_rate == 0	### input rate must be multiple of if rate
             decim = input_rate // if_rate
             maxf = min(if_rate // 2, 6000)	### lpf cutoff at most 6 KHz
-            lpf_coeffs = filter.firdes.low_pass(1.0, input_rate, maxf, maxf//8, filter.firdes.WIN_HAMMING)
+            lpf_coeffs = filter.firdes.low_pass(1.0, input_rate, maxf, maxf//8, fft.window.WIN_HAMMING)
             self.bb_decim = filter.fir_filter_fff(decim,  lpf_coeffs)
             self.connect(self, self.bb_decim, self.baseband_amp, self.symbol_filter, self.fsk4_demod, self.slicer, self)
         else:
@@ -263,13 +263,13 @@ class p25_demod_cb(p25_demod_base):
             self.if1 = input_rate / self.decim
             self.if2 = self.if1 / self.decim2
             sys.stderr.write( 'Using two-stage decimator for speed=%d, decim=%d/%d if1=%d if2=%d\n' % (input_rate, self.decim, self.decim2, self.if1, self.if2))
-            bpf_coeffs = filter.firdes.complex_band_pass(1.0, input_rate, -self.if1/2, self.if1/2, self.if1/2, filter.firdes.WIN_HAMMING)
+            bpf_coeffs = filter.firdes.complex_band_pass(1.0, input_rate, -self.if1/2, self.if1/2, self.if1/2, fft.window.WIN_HAMMING)
             self.t_cache[0] = bpf_coeffs
             fa = 6250
             fb = self.if2 / 2
             if filter_type == 'nxdn' and self.symbol_rate == 2400:	# nxdn48 6.25 KHz
                 fa = 3125
-            lpf_coeffs = filter.firdes.low_pass(1.0, self.if1, (fb+fa)/2, fb-fa, filter.firdes.WIN_HAMMING)
+            lpf_coeffs = filter.firdes.low_pass(1.0, self.if1, (fb+fa)/2, fb-fa, fft.window.WIN_HAMMING)
             self.bpf = filter.fir_filter_ccc(self.decim,  bpf_coeffs)
             self.lpf = filter.fir_filter_ccf(self.decim2, lpf_coeffs)
             resampled_rate = self.if2
@@ -286,7 +286,7 @@ class p25_demod_cb(p25_demod_base):
             if filter_type == 'nxdn' and self.symbol_rate == 2400:	# nxdn48 6.25 KHz
                 f1 = 3125
                 f2 = 625
-            lpf_coeffs = filter.firdes.low_pass(1.0, input_rate, f1, f2, filter.firdes.WIN_HANN)
+            lpf_coeffs = filter.firdes.low_pass(1.0, input_rate, f1, f2, fft.window.WIN_HANN)
             decimation = int(input_rate / if_rate)
             self.lpf = filter.fir_filter_ccf(decimation, lpf_coeffs)
             resampled_rate = float(input_rate) / float(decimation) # rate at output of self.lpf
@@ -304,7 +304,7 @@ class p25_demod_cb(p25_demod_base):
 
         fa = 6250
         fb = fa + 625
-        cutoff_coeffs = filter.firdes.low_pass(1.0, self.if_rate, (fb+fa)/2, fb-fa, filter.firdes.WIN_HANN)
+        cutoff_coeffs = filter.firdes.low_pass(1.0, self.if_rate, (fb+fa)/2, fb-fa, fft.window.WIN_HANN)
         self.cutoff = filter.fir_filter_ccf(1, cutoff_coeffs)
 
         omega = float(self.if_rate) / float(self.symbol_rate)
@@ -374,7 +374,7 @@ class p25_demod_cb(p25_demod_base):
                 if abs(bpf_freq) > self.relative_limit:
                     sys.stderr.write( 'set_relative_frequency: error, relative frequency %d(%d) exceeds limit %d\n' % (bpf_freq, freq, self.relative_limit))
                     return False
-                self.t_cache[bpf_freq] = filter.firdes.complex_band_pass(1.0, self.input_rate, -bpf_freq - self.if1/2, -bpf_freq + self.if1/2, self.if1/2, filter.firdes.WIN_HAMMING)
+                self.t_cache[bpf_freq] = filter.firdes.complex_band_pass(1.0, self.input_rate, -bpf_freq - self.if1/2, -bpf_freq + self.if1/2, self.if1/2, fft.window.WIN_HAMMING)
             self.bpf.set_taps(self.t_cache[bpf_freq])
             bfo_f = self.decim * -freq / float(self.input_rate)
             bfo_f -= int(bfo_f)

@@ -160,7 +160,7 @@ def tsv_config(filename):
 def do_request(d):
     global my_backend
     if d['command'].startswith('rx-'):
-        msg = gr.message().make_from_string(json.dumps(d), -2, 0, 0)
+        msg = op25.message().make_from_string(json.dumps(d), -2, 0, 0)
         if not my_backend.input_q.full_p():
             my_backend.input_q.insert_tail(msg)
         return None
@@ -240,9 +240,9 @@ def post_req(environ, start_response, postdata):
                 resp_msg.append(resp)
             continue
         if d['command'].startswith('settings-'):
-            msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+            msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
         else:
-            msg = gr.message().make_from_string(str(d['command']), -2, d['data'], 0)
+            msg = op25.message().make_from_string(str(d['command']), -2, d['data'], 0)
         if my_output_q.full_p():
             my_output_q.delete_head_nowait()   # ignores result
         if not my_output_q.full_p():
@@ -319,7 +319,7 @@ class http_server(object):
         my_output_q = output_q
         my_port = int(port)
 
-        my_recv_q = gr.msg_queue(10)
+        my_recv_q = op25.msg_queue(10)
 
         SEND_BYTES = 1024
         NTHREADS = 10	# TODO: make #threads a function of #plots ?
@@ -371,7 +371,7 @@ class Backend(threading.Thread):
 
         if init_config:
             d = {'command': 'rx-start', 'data': init_config}
-            msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+            msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
             self.input_q.insert_tail(msg)
 
     def publish(self, msg):
@@ -514,7 +514,7 @@ class Backend(threading.Thread):
                 d['rx-state'] = 'subprocess pid %d active' % self.subproc.pid
             else:
                 d['rx-state'] = 'subprocess not active, last msg: %s' % self.msg
-            msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+            msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
             if not self.output_q.full_p():
                 self.output_q.insert_tail(msg)
 
@@ -524,7 +524,7 @@ class Backend(threading.Thread):
             if not self.keep_running:
                 break
             js = ensure_str(js)
-            msg = gr.message().make_from_string(js, -4, 0, 0)
+            msg = op25.message().make_from_string(js, -4, 0, 0)
             if not self.output_q.full_p():
                 self.output_q.insert_tail(msg)
 
@@ -573,10 +573,10 @@ def http_main():
         print ('Ready for GDB to attach (pid = %d)' % (os.getpid(),))
         raw_input("Press 'Enter' to continue...")
 
-    input_q = gr.msg_queue(20)
-    output_q = gr.msg_queue(20)
-    backend_input_q = gr.msg_queue(20)
-    backend_output_q = gr.msg_queue(20)
+    input_q = op25.msg_queue(20)
+    output_q = op25.msg_queue(20)
+    backend_input_q = op25.msg_queue(20)
+    backend_output_q = op25.msg_queue(20)
 
     my_backend = Backend(options, backend_input_q, backend_output_q, init_config=options.config)
     server = http_server(input_q, output_q, options.endpoint)

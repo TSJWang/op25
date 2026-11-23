@@ -219,8 +219,8 @@ class p25_rx_block (gr.top_block):
             print ('Ready for GDB to attach (pid = %d)' % (os.getpid(),))
             raw_input("Press 'Enter' to continue...")
 
-        self.input_q = gr.msg_queue(20)
-        self.output_q = gr.msg_queue(10)
+        self.input_q = op25.msg_queue(20)
+        self.output_q = op25.msg_queue(10)
  
         # configure specified data source
         if options.input:
@@ -256,7 +256,7 @@ class p25_rx_block (gr.top_block):
         sps = 5		# samples / symbol
         if_rate = sps * 4800
 
-        self.rx_q = gr.msg_queue(100)
+        self.rx_q = op25.msg_queue(100)
         udp_port = 0
 
         vocoder = self.options.vocoder
@@ -463,7 +463,7 @@ class p25_rx_block (gr.top_block):
             if self.options.verbosity > 0:
                 sys.stderr.write('%f error_tracking: qfull\n' % (time.time()))
             return
-        msg = gr.message().make_from_string(js, -4, 0, 0)
+        msg = op25.message().make_from_string(js, -4, 0, 0)
         self.input_q.insert_tail(msg)
 
     def adjust_lo_freq(self):
@@ -536,7 +536,7 @@ class p25_rx_block (gr.top_block):
         params['fine_tune'] = self.options.fine_tune
         params['current_time'] = time.time()
         js = json.dumps(params)
-        msg = gr.message().make_from_string(js, -4, 0, 0)
+        msg = op25.message().make_from_string(js, -4, 0, 0)
         self.input_q.insert_tail(msg)
 
     def hamlib_attach(self, model):
@@ -549,7 +549,7 @@ class p25_rx_block (gr.top_block):
         self.hamlib.open ()
 
     def q_action(self, action):
-        msg = gr.message().make_from_string(action, -2, 0, 0)
+        msg = op25.message().make_from_string(action, -2, 0, 0)
         self.rx_q.insert_tail(msg)
 
     def set_gain(self, gain):
@@ -739,7 +739,7 @@ class p25_rx_block (gr.top_block):
         if self.options.demod_type == 'cqpsk':
             error = self.demod.get_freq_error()
         d = {'json_type': 'rx_update', 'error': error, 'fine_tune': self.options.fine_tune, 'files': filenames, 'time': time.time()}
-        msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+        msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
         self.input_q.insert_tail(msg)
 
     def process_update(self):
@@ -758,7 +758,7 @@ class p25_rx_block (gr.top_block):
         if self.input_q.full_p():
             return
         js = self.trunk_rx.to_json()
-        msg = gr.message().make_from_string(js, -4, 0, 0)
+        msg = op25.message().make_from_string(js, -4, 0, 0)
         self.input_q.insert_tail(msg)
         self.process_ajax()
 
@@ -766,7 +766,7 @@ class p25_rx_block (gr.top_block):
         if d is not None:
             self.sql_db.event(d)
         if d and not self.input_q.full_p():
-            msg = gr.message().make_from_string(json.dumps(d), -4, 0, 0)
+            msg = op25.message().make_from_string(json.dumps(d), -4, 0, 0)
             self.input_q.insert_tail(msg)
         self.process_update()
 
